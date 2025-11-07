@@ -2,13 +2,16 @@ require('dotenv').config()
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const {GoogleGenerativeAI} = require('@google/generative-ai');
 
 // .env configuration
 const FSQ_BASE = "https://places-api.foursquare.com/places/search";
 const FSQ_API_KEY = process.env.FSQ_API_KEY;
 const FSQ_API_VERSION = process.env.FSQ_API_VERSION || "2025-06-17";
-const OPENROUTER_API_KEY=process.env.OPENROUTER_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
+// setup Google Gemini SDK
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 let app = express();
 app.use(express.json());
@@ -20,7 +23,6 @@ app.get('/live', function (req, res) {
         'message': 'Hello world'
     })
 })
-
 
 app.get("/api/places/search", async (req, res) => {
     try {
@@ -59,17 +61,19 @@ app.get("/api/places/search", async (req, res) => {
 
 app.post('/chat', async (req, res) => {
     try {
-        const { userMessage } = req.body;
+        let { userMessage, systemMessage } = req.body;
+
+        systemMessage = systemMessage || '';
 
         const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-            model: 'deepseek/deepseek-r1-0528:free',
+            model: 'deepseek/deepseek-r1:free',
             response_format: {
                 type: "json_object"
             },
             messages: [
                 {
                     role: 'system',
-                    content: 'You are a helpful assistant that ONLY responds with a raw JSON object. Do not include any explanations, markdown, or additional text outside the JSON structure.'
+                    content: `${systemMessage}. You are a helpful assistant that ONLY responds with a raw JSON object. Do not include any explanations, markdown, or additional text outside the JSON structure.`
                 },
                 {
                     role: 'user',
@@ -84,12 +88,45 @@ app.post('/chat', async (req, res) => {
         });
 
         const aiResponse = response.data.choices[0].message.content;
+        console.log(aiResponse)
         res.json({ reply: aiResponse });
     } catch (error) {
-        console.error(error.response);
+        console.error(error);
         res.status(500).json({ error: 'An error occurred while processing your request.' });
     }
 });
+
+app.post('/gemini_chat', async (req, res) => {
+    try {
+        let { userMessage, systemMessage } = req.body;
+        systemMessage = systemMessage || '';
+
+        const model = genAI.getGenerativeModel({
+            model: 'gemini-2.5-flash-lite'
+        });
+
+        // Combine system + user message context
+        const prompt = `
+${systemMessage}
+You are a helpful assistant that ONLY responds with a raw JSON object. Do not include any code fences.
+Do not include any explanations, markdown, or text outside the JSON.
+User says: ${userMessage}
+`;
+
+        const result = await model.generateContent(prompt);
+        const aiResponse = result.response.text();
+
+        console.log(aiResponse);
+        res.json({ reply: aiResponse });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'An error occurred while processing your request.' });
+    }
+});
+
+app.listen(3000, () => console.log('Server running on port 3000'));
+
+
 
 
 // IMPORTANT: no routes after this
