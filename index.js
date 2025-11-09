@@ -59,7 +59,7 @@ app.get("/api/places/search", async (req, res) => {
     }
 });
 
-app.post('/chat', async (req, res) => {
+app.post('/api/deepseek/chat', async (req, res) => {
     try {
         let { userMessage, systemMessage } = req.body;
 
@@ -96,28 +96,87 @@ app.post('/chat', async (req, res) => {
     }
 });
 
-app.post('/gemini_chat', async (req, res) => {
+app.get('/api/og-image', async (req, res) => {
+    try {
+        const { url } = req.query;
+
+        if (!url) {
+            return res.status(400).json({ error: 'URL is required' });
+        }
+
+        const response = await axios.get(url, {
+            timeout: 10000,
+            maxRedirects: 5,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        });
+        const html = response.data;
+        
+        // Try multiple patterns for og:image
+        const patterns = [
+            /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i,
+            /<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i,
+            /<meta\s+name=["']og:image["']\s+content=["']([^"']+)["']/i,
+            /<meta\s+property=["']og:image:secure_url["']\s+content=["']([^"']+)["']/i,
+            /<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i
+        ];
+        
+        for (const pattern of patterns) {
+            const match = html.match(pattern);
+            if (match && match[1]) {
+                return res.json({ ogImage: match[1] });
+            }
+        }
+        
+        res.json({ ogImage: null });
+    } catch (error) {
+        console.error(`Failed to fetch og:image from ${req.body.url}:`, error.message);
+        res.status(500).json({ error: 'Failed to fetch Open Graph image', ogImage: null });
+    }
+});
+
+app.post('/api/gemini/chat', async (req, res) => {
     try {
 
-        let { userMessage, systemMessage } = req.body;
+        let { userMessage, systemMessage, lat, lng } = req.body;
         systemMessage = systemMessage || '';
 
 
         // Combine system + user message context
-        const prompt = `${systemMessage}. Respond ONLY with a raw JSON object. Do not include any code fences. Do not include any explanations, markdown, or text outside the JSON. User says: ${userMessage}`;
+        const prompt = `${systemMessage}. Respond ONLY with a raw JSON object. Do not include any code fences. Do not include any explanations, markdown, or text outside the JSON.  User says: "${userMessage}. Reply to me as a travel advisor near where I am. Always include latitude and longitude in the JSON object"`;
+
+        // configure google map grounding
+        const config = {
+            tools: [{ googleMaps: {} }],          
+        }
+
+        // only set lat and lng if both are provided
+        if (lat && lng) {
+            config.toolConfig = {
+                retrievalConfig: {
+                    latLng:{
+                        latitude:lat,
+                        longitude:lng
+                    }
+                }
+            }
+        }
 
         const response = await genAI.models.generateContent({
             model: "gemini-2.5-flash-lite",
             contents: prompt,
-            config: {
-                tools: [{ googleMaps: {} }],
-            }
+            config
         });
 
         const aiResponse = response;
-        console.log(aiResponse);
+        
+        // check for code fence in replies and remove them
+        const aiResponseText = aiResponse.candidates[0].content.parts[0].text;
+        const aiResponseTextWithoutCodeFence = aiResponseText.replace(/```\w*\n?/g, '');
+
         res.json({
-            reply: aiResponse.candidates[0].content.parts[0].text,
+            reply: JSON.parse(aiResponseTextWithoutCodeFence),
             groundingChunks: aiResponse.candidates[0].groundingMetadata.groundingChunks
         });
     } catch (error) {
@@ -126,12 +185,7 @@ app.post('/gemini_chat', async (req, res) => {
     }
 });
 
-app.listen(3000, () => console.log('Server running on port 3000'));
-
-
-
-
 // IMPORTANT: no routes after this
-app.listen(3000, () => {
+app.listen(process.env.PORT || 3000, () => {
     console.log("Server started")
 })
