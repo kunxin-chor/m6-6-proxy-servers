@@ -64,20 +64,25 @@ app.post('/api/deepseek/chat', async (req, res) => {
         let { userMessage, systemMessage } = req.body;
 
         systemMessage = systemMessage || '';
+        const deepseekModels = [
+            "deepseek/deepseek-r1-distill-llama-70b:free",
+            "tngtech/deepseek-r1t2-chimera:free",
+            "deepseek/deepseek-r1:free"
+        ]
 
         const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-            model: 'deepseek/deepseek-r1:free',
+            model: deepseekModels[1],
             response_format: {
                 type: "json_object"
             },
             messages: [
                 {
                     role: 'system',
-                    content: `${systemMessage}. You are a helpful assistant that ONLY responds with a raw JSON object. Do not include any explanations, markdown, or additional text outside the JSON structure.`
+                    content: `${systemMessage}. You are a helpful assistant that ONLY responds with a raw JSON object. Do not include any code fences, explanations, markdown, or additional text outside the JSON structure.`
                 },
                 {
                     role: 'user',
-                    content: `${userMessage}. Respond with ONLY a raw JSON object, no additional text, explanations, markdown. Do not format the reply.`
+                    content: `${userMessage}. Respond with ONLY a raw JSON object, no additional text, explanations, markdown, no code fences. Do not format the reply.`
                 },
             ],
         }, {
@@ -87,54 +92,21 @@ app.post('/api/deepseek/chat', async (req, res) => {
             },
         });
 
-        const aiResponse = response.data.choices[0].message.content;
-        console.log(aiResponse)
-        res.json({ reply: aiResponse });
+        const aiResponse = JSON.parse(response.data.choices[0].message.content)
+        console.log(response.data.choices[0].message.content)
+        // res.json({ 
+        //     text: aiResponse.text,
+        //     locations: aiResponse.locations 
+        // });
+        res.json({
+            content: aiResponse
+        })
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: 'An error occurred while processing your request.' });
+        res.status(error.response.status).json({ error: error.response.data });
     }
 });
 
-app.get('/api/og-image', async (req, res) => {
-    try {
-        const { url } = req.query;
-
-        if (!url) {
-            return res.status(400).json({ error: 'URL is required' });
-        }
-
-        const response = await axios.get(url, {
-            timeout: 10000,
-            maxRedirects: 5,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        });
-        const html = response.data;
-        
-        // Try multiple patterns for og:image
-        const patterns = [
-            /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i,
-            /<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i,
-            /<meta\s+name=["']og:image["']\s+content=["']([^"']+)["']/i,
-            /<meta\s+property=["']og:image:secure_url["']\s+content=["']([^"']+)["']/i,
-            /<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i
-        ];
-        
-        for (const pattern of patterns) {
-            const match = html.match(pattern);
-            if (match && match[1]) {
-                return res.json({ ogImage: match[1] });
-            }
-        }
-        
-        res.json({ ogImage: null });
-    } catch (error) {
-        console.error(`Failed to fetch og:image from ${req.body.url}:`, error.message);
-        res.status(500).json({ error: 'Failed to fetch Open Graph image', ogImage: null });
-    }
-});
 
 app.post('/api/gemini/chat', async (req, res) => {
     try {
@@ -176,7 +148,7 @@ app.post('/api/gemini/chat', async (req, res) => {
         const aiResponseTextWithoutCodeFence = aiResponseText.replace(/```\w*\n?/g, '');
 
         res.json({
-            reply: JSON.parse(aiResponseTextWithoutCodeFence),
+            content: JSON.parse(aiResponseTextWithoutCodeFence),
             groundingChunks: aiResponse.candidates[0].groundingMetadata.groundingChunks
         });
     } catch (error) {
